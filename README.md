@@ -177,7 +177,7 @@ tapestry/
 ## Links
 
 - **Demo Video:** [Watch on Vimeo](https://vimeo.com/1174045515?share=copy&fl=sv&fe=ci)
-- **Blog Post:** [Building Tapestry: How We Taught an AI to Tell History Like a Documentary](./tapestry-blog.md)
+- **Blog Post:** [Building Tapestry: How We Taught an AI to Tell History Like a Documentary](https://dev.to/shogun_the_grt/building-tapestry-how-we-taught-an-ai-to-tell-history-like-a-documentary-5cfn)
 
 
 ---

@@ -43,6 +43,7 @@ export async function GET(req: Request) {
         sources: task.sources || null,
         images,
         interleavedParts: task.interleavedParts || null,
+        language: task.language || null,
       }
     }), {
       headers: { "Content-Type": "application/json" }

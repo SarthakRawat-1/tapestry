@@ -587,6 +587,7 @@ export function DocumentaryScroll({ output, sources, heroImages, locationName, t
                     alt={output.title}
                     className="w-full aspect-video object-cover"
                     style={{ filter: 'sepia(0.15) saturate(0.9)' }}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                   />
                 </div>
               </motion.div>

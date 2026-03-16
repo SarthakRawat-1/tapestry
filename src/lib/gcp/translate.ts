@@ -199,6 +199,33 @@ export async function translateResearchOutput(
 }
 
 /**
+ * Translate interleaved narrative parts (text parts only; image parts are left untouched).
+ */
+export async function translateInterleavedParts(
+  parts: Array<{ type: string; text?: string; imageUrl?: string }>,
+  targetLanguage: string,
+): Promise<Array<{ type: string; text?: string; imageUrl?: string }>> {
+  const textIndices: number[] = [];
+  const texts: string[] = [];
+
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i].type === 'text' && parts[i].text) {
+      textIndices.push(i);
+      texts.push(parts[i].text!);
+    }
+  }
+
+  if (texts.length === 0) return parts;
+
+  const translated = await translateBatch(texts, targetLanguage);
+  const result = parts.map(p => ({ ...p }));
+  for (let i = 0; i < textIndices.length; i++) {
+    result[textIndices[i]].text = translated[i].translatedText;
+  }
+  return result;
+}
+
+/**
  * Check if Translation API is configured.
  */
 export function isTranslateConfigured(): boolean {

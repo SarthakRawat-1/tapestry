@@ -162,6 +162,7 @@ export async function updateResearchTask(
     research_output?: any;
     sources?: any[];
     interleaved_parts?: any[];
+    language?: string;
   }
 ) {
   const db = await getDb();
@@ -172,6 +173,7 @@ export async function updateResearchTask(
   if (updates.research_output !== undefined) setFields.researchOutput = updates.research_output;
   if (updates.sources !== undefined) setFields.sources = updates.sources;
   if (updates.interleaved_parts !== undefined) setFields.interleavedParts = updates.interleaved_parts;
+  if (updates.language !== undefined) setFields.language = updates.language;
 
   await db.collection("researchTasks").updateOne(
     { _id: taskId as any },

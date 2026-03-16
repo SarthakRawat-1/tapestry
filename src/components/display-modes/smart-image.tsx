@@ -56,6 +56,12 @@ export function SmartImage({ prompt, alt, locationName, taskId, layout, classNam
     setLoading(true);
     setFailed(false);
 
+    if (!prompt) {
+      setLoading(false);
+      setFailed(true);
+      return;
+    }
+
     const promptKey = prompt.slice(0, 100).replace(/[^a-zA-Z0-9]/g, '_');
     const currentTaskId = taskIdRef.current;
 

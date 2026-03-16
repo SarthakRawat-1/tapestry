@@ -19,6 +19,80 @@ function getClient() {
 }
 
 // ============================================================================
+// JSON Repair Helper
+// ============================================================================
+
+/**
+ * Attempt to repair truncated JSON from Gemini by closing open structures.
+ * This handles the common case where maxOutputTokens is hit mid-response.
+ */
+function repairTruncatedJson(raw: string): ResearchOutput {
+  let s = raw.trim();
+
+  // Strip trailing incomplete string/value: find last complete key-value or array element
+  // Walk backwards to find the last structurally valid point
+  // Remove any trailing incomplete string literal (unterminated quote)
+  const lastQuote = s.lastIndexOf('"');
+  if (lastQuote > 0) {
+    // Check if this quote is an unterminated string by counting backslashes before it
+    let bs = 0;
+    for (let i = lastQuote - 1; i >= 0 && s[i] === '\\'; i--) bs++;
+    // If the quote is escaped, it's not a real quote boundary — trim further
+    if (bs % 2 === 1) {
+      s = s.slice(0, lastQuote - 1);
+    }
+  }
+
+  // Remove any trailing partial value after the last comma or colon
+  // Find the last complete element boundary
+  const lastComplete = Math.max(
+    s.lastIndexOf('}'),
+    s.lastIndexOf(']'),
+    s.lastIndexOf('"'),
+  );
+  if (lastComplete > 0) {
+    s = s.slice(0, lastComplete + 1);
+  }
+
+  // Remove trailing comma if present
+  s = s.replace(/,\s*$/, '');
+
+  // Close any open brackets/braces
+  const stack: string[] = [];
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{' || ch === '[') stack.push(ch);
+    else if (ch === '}' || ch === ']') stack.pop();
+  }
+
+  // Close unclosed structures in reverse order
+  while (stack.length > 0) {
+    const open = stack.pop();
+    s += open === '{' ? '}' : ']';
+  }
+
+  try {
+    return JSON.parse(s);
+  } catch {
+    console.error('[Synthesize] JSON repair also failed, returning minimal output');
+    return {
+      title: 'Research Output',
+      subtitle: '',
+      summary: 'The research output was too large to process completely. Please try again.',
+      location: { name: '', lat: 0, lng: 0 },
+      sections: [],
+      timeline: [],
+    } as ResearchOutput;
+  }
+}
+
+// ============================================================================
 // Step 1: Query Planning
 // ============================================================================
 
@@ -217,21 +291,20 @@ Write a comprehensive documentary narrative with clear section headings. Include
   const structurePrompt = `Convert the following documentary narrative about "${locationName}" into the exact JSON structure specified.
 
 DOCUMENTARY NARRATIVE:
-${groundedNarrative}
+${groundedNarrative.slice(0, 24000)}
 
 STRUCTURING RULES:
-- Each section must have 4-8 content blocks.
-- Text narration blocks should be SUBSTANTIAL — 150-300 words each. Preserve the rich detail from the narrative above.
+- Each section must have 3-5 content blocks.
+- Text narration blocks should be 80-150 words each. Be concise but preserve key facts, dates, and quotes.
 - Never place two blocks of the same type consecutively within a section.
-- Use at most TWO map blocks in the entire output, placed where geography matters to the story.
+- Use at most ONE map block in the entire output.
 - Text blocks: use "narration" for prose paragraphs, "headline" for section openers, "quote" for historical quotes with attribution, "caption" for image/map captions.
-- Image blocks: write detailed prompts as if briefing a visual artist. The prompt MUST explicitly mention the location name ("{locationName}") to anchor the image. Specify exact era, time of day, mood, color palette, composition, architectural style, and clothing. CRITICAL: Strictly forbid anachronisms or hallucinated elements (e.g., do not add animals like elephants/chariots unless specifically mentioned in the text context). Keep the subject matter highly specific to the text block.
-- Diagram blocks: describe data visualizations with specific data points from the narrative.
-- Timeline: include 8-12 key events in chronological order with vivid, location-anchored image prompts following the same strict rules above.
+- Image blocks: one per section maximum. Write a concise prompt (max 40 words) mentioning "${locationName}", the era, and mood. No anachronisms.
+- Diagram blocks: only include if the narrative contains specific numeric data worth visualizing.
+- Timeline: include 6-8 key events in chronological order. Image prompts max 30 words each.
 - The title should be compelling and documentary-style.
 - The summary should be 2-3 sentences suitable for social sharing.
-- Map blocks need lat, lng, zoom (1-18), label, and description.
-- Preserve ALL factual content, quotes, dates, and details from the narrative. Do not summarize or shorten.`;
+- Map blocks need lat, lng, zoom (1-18), label, and description.`;
 
   const structuredResponse = await ai.models.generateContent({
     model: 'gemini-2.5-pro',
@@ -240,11 +313,19 @@ STRUCTURING RULES:
       responseMimeType: 'application/json',
       responseJsonSchema: researchJsonSchema,
       temperature: 0.3,
-      maxOutputTokens: 32768,
+      maxOutputTokens: 65536,
     },
   });
 
-  const output: ResearchOutput = JSON.parse(structuredResponse.text ?? '{}');
+  const rawJson = structuredResponse.text ?? '{}';
+  let output: ResearchOutput;
+  try {
+    output = JSON.parse(rawJson);
+  } catch (parseError) {
+    // Gemini may return truncated JSON — attempt to repair it
+    console.warn('[Synthesize] JSON parse failed, attempting repair...', (parseError as Error).message);
+    output = repairTruncatedJson(rawJson);
+  }
 
   // Ensure location is set correctly
   output.location = { name: locationName, lat, lng };

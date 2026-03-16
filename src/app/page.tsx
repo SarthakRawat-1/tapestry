@@ -28,6 +28,7 @@ function HomeContent() {
   const [customInstructions, setCustomInstructions] = useState<string | undefined>(undefined);
   const [excludedSources, setExcludedSources] = useState<string[] | undefined>(undefined);
   const [selectedLanguage, setSelectedLanguage] = useState<string | undefined>(undefined);
+  const [activeResearchTaskId, setActiveResearchTaskId] = useState<string | undefined>(undefined);
   const [globeTheme, setGlobeTheme] = useState<GlobeTheme>('hybrid');
   const globeRef = useRef<any>(null);
   const [showMobileSettings, setShowMobileSettings] = useState(false);
@@ -66,6 +67,7 @@ function HomeContent() {
     // If this is loading existing research (has taskId), allow it
     if (taskId) {
       setSelectedLocation(location);
+      setActiveResearchTaskId(taskId);
       const params = new URLSearchParams(window.location.search);
       params.set('research', taskId);
       window.history.pushState({}, '', `?${params.toString()}`);
@@ -95,8 +97,15 @@ function HomeContent() {
       setExcludedSources(sources);
       setSelectedLanguage(language);
       setSelectedLocation(confirmLocation);
+      setActiveResearchTaskId(undefined);
       setShowConfirmDialog(false);
       setConfirmLocation(null);
+
+      // Clear any existing research ID from URL so the interface runs fresh research
+      const params = new URLSearchParams(window.location.search);
+      params.delete('research');
+      const newUrl = params.toString() ? `?${params.toString()}` : '/';
+      window.history.replaceState({}, '', newUrl);
     }
   }, [confirmLocation, isSignedIn]);
 
@@ -107,6 +116,7 @@ function HomeContent() {
 
   const handleCloseResearch = useCallback(() => {
     setSelectedLocation(null);
+    setActiveResearchTaskId(undefined);
 
     // Remove research ID from URL
     const params = new URLSearchParams(window.location.search);
@@ -136,6 +146,7 @@ function HomeContent() {
               lat: task.locationLat,
               lng: task.locationLng,
             });
+            setActiveResearchTaskId(researchId);
           } else {
             // Fallback if task not found
             setSelectedLocation({
@@ -257,11 +268,12 @@ function HomeContent() {
               onClose={handleCloseResearch}
               onTaskCreated={(taskId) => {
                 // Update URL with research ID
+                setActiveResearchTaskId(taskId);
                 const params = new URLSearchParams(window.location.search);
                 params.set('research', taskId);
                 window.history.pushState({}, '', `?${params.toString()}`);
               }}
-              initialTaskId={searchParams.get('research') || undefined}
+              initialTaskId={activeResearchTaskId}
               customInstructions={customInstructions}
               excludedSources={excludedSources}
               targetLanguage={selectedLanguage}

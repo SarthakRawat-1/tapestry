@@ -10,7 +10,7 @@ export const maxDuration = 300; // 5 minutes
 
 export async function POST(req: NextRequest) {
   try {
-    const { location, customInstructions, excludedSources } = await req.json();
+    const { location, customInstructions, excludedSources, language } = await req.json();
 
     if (!location || !location.name) {
       return new Response(
@@ -176,6 +176,7 @@ export async function POST(req: NextRequest) {
               sources: allSources,
               location_images: persistedImages,
               interleaved_parts: result.interleaved.length > 0 ? interleavedForClient : undefined,
+              language: language || undefined,
             });
           }
 

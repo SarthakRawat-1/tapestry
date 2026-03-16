@@ -29,9 +29,14 @@ import { SmartImage } from './smart-image';
 
 type Page =
   | { kind: 'title'; title: string; subtitle: string; summary: string; locationName: string; heroImage?: string }
-  | { kind: 'section'; section: ResearchSection; index: number }
-  | { kind: 'timeline'; timeline: TimelineEntry[] }
+  | { kind: 'section'; section: ResearchSection; index: number; blockStart: number; blockEnd: number; totalPages: number; pageInSection: number }
+  | { kind: 'timeline'; timeline: TimelineEntry[]; start: number; end: number }
   | { kind: 'sources'; sources: DisplayModeProps['sources'] };
+
+// Max blocks per section page — keeps content from overflowing the fixed page height
+const BLOCKS_PER_PAGE = 4;
+// Max timeline entries per page
+const TIMELINE_PER_PAGE = 5;
 
 function buildPages(
   output: DisplayModeProps['output'],
@@ -47,12 +52,35 @@ function buildPages(
     locationName: output.location?.name || '',
     heroImage: heroImages[0],
   });
+
   output.sections.forEach((section, idx) => {
-    pages.push({ kind: 'section', section, index: idx });
+    const blocks = section.blocks;
+    const numPages = Math.ceil(blocks.length / BLOCKS_PER_PAGE) || 1;
+    for (let p = 0; p < numPages; p++) {
+      pages.push({
+        kind: 'section',
+        section,
+        index: idx,
+        blockStart: p * BLOCKS_PER_PAGE,
+        blockEnd: Math.min((p + 1) * BLOCKS_PER_PAGE, blocks.length),
+        totalPages: numPages,
+        pageInSection: p,
+      });
+    }
   });
+
   if (output.timeline && output.timeline.length > 0) {
-    pages.push({ kind: 'timeline', timeline: output.timeline });
+    const tl = output.timeline;
+    for (let start = 0; start < tl.length; start += TIMELINE_PER_PAGE) {
+      pages.push({
+        kind: 'timeline',
+        timeline: tl,
+        start,
+        end: Math.min(start + TIMELINE_PER_PAGE, tl.length),
+      });
+    }
   }
+
   if (sources && sources.length > 0) {
     pages.push({ kind: 'sources', sources });
   }
@@ -229,12 +257,13 @@ function TitlePageContent({ page }: { page: Extract<Page, { kind: 'title' }> }) 
 function SectionPageContent({ page, locationName, taskId }: {
   page: Extract<Page, { kind: 'section' }>; locationName: string; taskId?: string | null;
 }) {
-  const { section, index } = page;
+  const { section, index, blockStart, blockEnd, totalPages, pageInSection } = page;
+  const visibleBlocks = section.blocks.slice(blockStart, blockEnd);
   return (
     <div className="flex flex-col px-5 sm:px-7 py-4 sm:py-5">
       <div className="text-center mb-3 pb-2.5 border-b border-stone-300/50 dark:border-stone-600/30">
         <span className="text-[9px] font-sans font-semibold tracking-[0.3em] uppercase text-stone-400/70 dark:text-stone-500/60">
-          Chapter {stageNumerals[section.stage] || (index + 1)}
+          Chapter {stageNumerals[section.stage] || (index + 1)}{totalPages > 1 ? ` · ${pageInSection + 1}/${totalPages}` : ''}
         </span>
         <h2 className="text-base sm:text-lg font-serif font-bold text-stone-800 dark:text-stone-100 mt-0.5 tracking-wide leading-tight">
           {section.title || stageLabels[section.stage] || section.stage}
@@ -246,8 +275,8 @@ function SectionPageContent({ page, locationName, taskId }: {
         </div>
       </div>
       <div>
-        {section.blocks.map((block, blockIdx) => (
-          <FlipBlock key={blockIdx} block={block} isFirst={blockIdx === 0} locationName={locationName} taskId={taskId} />
+        {visibleBlocks.map((block, blockIdx) => (
+          <FlipBlock key={blockStart + blockIdx} block={block} isFirst={blockIdx === 0 && pageInSection === 0} locationName={locationName} taskId={taskId} />
         ))}
       </div>
     </div>
@@ -255,17 +284,21 @@ function SectionPageContent({ page, locationName, taskId }: {
 }
 
 function TimelinePageContent({ page }: { page: Extract<Page, { kind: 'timeline' }> }) {
+  const entries = page.timeline.slice(page.start, page.end);
+  const isFirst = page.start === 0;
   return (
     <div className="flex flex-col px-5 sm:px-7 py-4 sm:py-5">
       <div className="text-center mb-3 pb-2.5 border-b border-stone-300/50 dark:border-stone-600/30">
         <span className="text-[9px] font-sans font-semibold tracking-[0.3em] uppercase text-stone-400/70 dark:text-stone-500/60">Chronology</span>
-        <h2 className="text-base sm:text-lg font-serif font-bold text-stone-800 dark:text-stone-100 mt-0.5">Through the Ages</h2>
+        <h2 className="text-base sm:text-lg font-serif font-bold text-stone-800 dark:text-stone-100 mt-0.5">
+          {isFirst ? 'Through the Ages' : `Through the Ages (cont.)`}
+        </h2>
       </div>
       <div className="relative">
         <div className="absolute left-2.5 top-0 bottom-0 w-px bg-gradient-to-b from-amber-700/40 via-amber-700/20 to-transparent dark:from-amber-500/30" />
         <div className="space-y-3.5">
-          {page.timeline.map((entry, idx) => (
-            <div key={idx} className="relative pl-7">
+          {entries.map((entry, idx) => (
+            <div key={page.start + idx} className="relative pl-7">
               <div className="absolute left-1 top-1.5 w-2.5 h-2.5 rounded-full bg-amber-700/60 dark:bg-amber-500/50 border-2 border-stone-100 dark:border-stone-800 shadow-sm" />
               <div className="text-[9px] font-mono font-bold text-amber-700/70 dark:text-amber-500/60 mb-0.5">{entry.year}</div>
               <h4 className="text-xs font-serif font-semibold text-stone-800/85 dark:text-stone-200/80 mb-0.5">{entry.title}</h4>
@@ -399,7 +432,7 @@ function PageLayer({
         </span>
       </div>
       {/* Content */}
-      <div className="absolute inset-0 pt-6 overflow-hidden">
+      <div className="absolute inset-0 pt-6 overflow-y-auto overflow-x-hidden scrollbar-hide">
         <PageContent page={page} locationName={locationName} taskId={taskId} />
       </div>
     </div>
@@ -467,7 +500,7 @@ export function FlipbookView({ output, sources, heroImages, locationName, taskId
         {/* Page viewport */}
         <div
           className="relative flex-1 cursor-pointer"
-          style={{ minHeight: '480px', perspective: '1400px' }}
+          style={{ minHeight: '520px', height: '520px', perspective: '1400px' }}
           onClick={(e) => {
             const target = e.target as HTMLElement;
             if (target.closest('a, button, iframe, input, textarea, select')) return;

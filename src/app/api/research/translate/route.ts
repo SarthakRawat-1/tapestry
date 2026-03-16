@@ -1,18 +1,18 @@
 import { NextRequest } from 'next/server';
-import { translateResearchOutput, isTranslateConfigured } from '@/lib/gcp/translate';
+import { translateResearchOutput, translateInterleavedParts, isTranslateConfigured } from '@/lib/gcp/translate';
 
 export const maxDuration = 30;
 
 /**
  * POST /api/research/translate
- * Translate a ResearchOutput to a target language.
+ * Translate a ResearchOutput (and optionally interleavedParts) to a target language.
  *
- * Body: { researchOutput, targetLanguage }
- * Returns: { translatedOutput }
+ * Body: { researchOutput, targetLanguage, interleavedParts? }
+ * Returns: { translatedOutput, translatedParts? }
  */
 export async function POST(req: NextRequest) {
   try {
-    const { researchOutput, targetLanguage } = await req.json();
+    const { researchOutput, targetLanguage, interleavedParts } = await req.json();
 
     if (!researchOutput) {
       return new Response(
@@ -35,10 +35,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const translatedOutput = await translateResearchOutput(researchOutput, targetLanguage);
+    const [translatedOutput, translatedParts] = await Promise.all([
+      translateResearchOutput(researchOutput, targetLanguage),
+      interleavedParts?.length
+        ? translateInterleavedParts(interleavedParts, targetLanguage)
+        : Promise.resolve(undefined),
+    ]);
 
     return new Response(
-      JSON.stringify({ translatedOutput }),
+      JSON.stringify({ translatedOutput, translatedParts }),
       { headers: { 'Content-Type': 'application/json' } },
     );
   } catch (error) {

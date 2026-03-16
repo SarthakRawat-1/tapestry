@@ -137,6 +137,7 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
   const abortControllerRef = useRef<AbortController | null>(null);
   const [displayMode, setDisplayMode] = useState<DisplayMode>('scroll');
   const [translating, setTranslating] = useState(false);
+  const [activeLanguage, setActiveLanguage] = useState<string | undefined>(targetLanguage);
   const globeInitialCenter = useMemo<[number, number] | undefined>(() => {
     if (displayLocation && displayLocation.lat !== 0 && displayLocation.lng !== 0) {
       return [displayLocation.lng, displayLocation.lat];
@@ -292,7 +293,7 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
     abortControllerRef.current = controller;
 
     try {
-      const langCode = targetLanguage || 'en';
+      const langCode = activeLanguage || 'en';
       // Map language to BCP-47 and a suitable voice
       const ttsLangMap: Record<string, { languageCode: string; voiceName: string }> = {
         en: { languageCode: 'en-US', voiceName: 'en-US-Journey-D' },
@@ -379,7 +380,7 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
         playNextChunkRef.current();
       }
     }
-  }, [audioState, researchOutput, targetLanguage]);
+  }, [audioState, researchOutput, activeLanguage]);
 
   // Cleanup audio on unmount
   useEffect(() => {
@@ -405,6 +406,11 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
 
   // Load saved research data when opening from history or share link
   const savedDataLoadedRef = useRef(false);
+  useEffect(() => {
+    // Reset when task changes so we reload fresh data
+    savedDataLoadedRef.current = false;
+  }, [initialTaskId]);
+
   useEffect(() => {
     if (!initialTaskId || savedDataLoadedRef.current) return;
 
@@ -436,6 +442,7 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
         if (task.sources) setSources(task.sources);
         if (task.images && task.images.length > 0) setHeroImages(task.images);
         if (task.interleavedParts && task.interleavedParts.length > 0) setInterleavedParts(task.interleavedParts);
+        if (task.language) setActiveLanguage(task.language);
         if (task.status === 'completed') {
           setStatus('completed');
         } else if (task.status === 'failed') {
@@ -452,6 +459,12 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
 
   const researchInitiatedRef = useRef(false);
   const previousLocationRef = useRef<string | null>(null);
+  const translationDoneRef = useRef(false);
+
+  // Reset translation flag when switching history items so re-translation is triggered
+  useEffect(() => {
+    translationDoneRef.current = false;
+  }, [initialTaskId]);
 
   useEffect(() => {
     if (!location || initialTaskId) return;
@@ -459,6 +472,7 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
     if (previousLocationRef.current !== locationKey) {
       previousLocationRef.current = locationKey;
       researchInitiatedRef.current = false;
+      translationDoneRef.current = false;
     }
 
     if (researchInitiatedRef.current) {
@@ -489,6 +503,7 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
             location,
             customInstructions,
             excludedSources,
+            language: activeLanguage,
           }),
         });
 
@@ -584,27 +599,41 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
     runResearch();
   }, [location, initialTaskId]);
 
+  // Refs for translation effect to avoid re-triggering when output changes
+  const researchOutputRef = useRef(researchOutput);
+  researchOutputRef.current = researchOutput;
+  const interleavedPartsRef = useRef(interleavedParts);
+  interleavedPartsRef.current = interleavedParts;
+
   // Translate research output when completed and a non-English language is selected
   useEffect(() => {
-    if (!targetLanguage || !researchOutput || status !== 'completed' || translating) return;
+    const currentOutput = researchOutputRef.current;
+    const currentParts = interleavedPartsRef.current;
+    if (!activeLanguage || !currentOutput || status !== 'completed') return;
+    // Prevent re-translating after we already replaced researchOutput with the translated version
+    if (translationDoneRef.current) return;
 
     let cancelled = false;
     setTranslating(true);
+    translationDoneRef.current = true;
     setPipelineStep('translating');
-    setPipelineMessage(`Translating to ${targetLanguage}...`);
+    setPipelineMessage(`Translating to ${activeLanguage}...`);
 
     (async () => {
       try {
         const res = await fetch('/api/research/translate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ researchOutput, targetLanguage }),
+          body: JSON.stringify({ researchOutput: currentOutput, targetLanguage: activeLanguage, interleavedParts: currentParts.length > 0 ? currentParts : undefined }),
         });
         if (res.ok && !cancelled) {
-          const { translatedOutput } = await res.json();
+          const { translatedOutput, translatedParts } = await res.json();
           if (translatedOutput) {
             setResearchOutput(translatedOutput);
             setContent(buildMarkdownFromOutput(translatedOutput));
+          }
+          if (translatedParts) {
+            setInterleavedParts(translatedParts);
           }
         }
       } catch (err) {
@@ -620,7 +649,7 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
 
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, targetLanguage]);
+  }, [status, activeLanguage]);
 
 
   if (!displayLocation) return null;
