@@ -62,7 +62,7 @@ Built for the **Gemini Live Agent Challenge** hackathon. #GeminiLiveAgentChallen
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/tapestry.git
+git clone https://github.com/SarthakRawat-1/tapestry
 cd tapestry
 
 # Install dependencies
