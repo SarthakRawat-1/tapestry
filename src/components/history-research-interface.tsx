@@ -325,7 +325,11 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
         signal: controller.signal,
       });
 
-      if (!response.ok) throw new Error('TTS failed');
+      if (!response.ok) {
+        const errBody = await response.text().catch(() => '');
+        console.error('[TTS] API returned', response.status, errBody);
+        throw new Error(`TTS failed (${response.status}): ${errBody}`);
+      }
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -368,7 +372,7 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
         console.error('[TTS] Error:', error);
-        if (!playbackStarted) setAudioState('idle');
+        setAudioState('idle');
       }
     } finally {
       abortControllerRef.current = null;
@@ -856,12 +860,15 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
                         })}
                       </div>
                     </div>
-                    <div className="space-y-2 sm:space-y-3">
-                      <Skeleton className="h-6 sm:h-8 w-3/4" />
-                      <Skeleton className="h-3 sm:h-4 w-full" />
-                      <Skeleton className="h-3 sm:h-4 w-full" />
-                      <Skeleton className="h-3 sm:h-4 w-5/6" />
-                    </div>
+                    {/* Show skeleton only before we have the documentary */}
+                    {!researchOutput && (
+                      <div className="space-y-2 sm:space-y-3">
+                        <Skeleton className="h-6 sm:h-8 w-3/4" />
+                        <Skeleton className="h-3 sm:h-4 w-full" />
+                        <Skeleton className="h-3 sm:h-4 w-full" />
+                        <Skeleton className="h-3 sm:h-4 w-5/6" />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -874,8 +881,8 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
               </div>
             )}
 
-            {/* Research Content - show when we have content AND status is completed */}
-            {status === 'completed' && translating && (
+            {/* Research Content - show as soon as researchOutput is available (even while illustrating) */}
+            {(status === 'completed' || status === 'running') && translating && (
               <div className="bg-background/60 backdrop-blur-sm rounded-lg p-4 sm:p-6 border shadow-sm">
                 <div className="flex items-center gap-3">
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
@@ -886,7 +893,7 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
                 </div>
               </div>
             )}
-            {status === 'completed' && (
+            {(status === 'completed' || (status === 'running' && researchOutput)) && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -960,7 +967,7 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
             )}
 
             {/* Sources Summary — only show when no structured display mode is active */}
-            {sources.length > 0 && status === 'completed' && !(['scroll', 'flipbook', 'timeline', 'interleaved'].includes(displayMode) && researchOutput) && (
+            {sources.length > 0 && (status === 'completed' || (status === 'running' && researchOutput)) && !(['scroll', 'flipbook', 'timeline', 'interleaved'].includes(displayMode) && researchOutput) && (
               <div className="space-y-3 sm:space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -1027,7 +1034,7 @@ export function HistoryResearchInterface({ location, onClose, onTaskCreated, ini
             )}
 
             {/* Research Stats */}
-            {status === 'completed' && sources.length > 0 && (() => {
+            {(status === 'completed' || (status === 'running' && researchOutput)) && sources.length > 0 && (() => {
               const totalWords = sources.reduce((acc, s) => acc + (s.snippet?.split(/\s+/).length || 0), 0);
               const readingMinutes = Math.ceil(totalWords / 250);
               const researchMinutes = sources.length * 2;

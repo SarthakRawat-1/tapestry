@@ -39,8 +39,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const chunks = splitTextByWords(script, 50);
+    // Use larger chunks (200 words) to reduce API calls and avoid Journey voice
+    // rate limits (30 req/min). Cloud TTS supports up to 5000 bytes per request.
+    const chunks = splitTextByWords(script, 200);
     const encoder = new TextEncoder();
+
+    console.log(`[TTS] Narration: ${script.length} chars, ${chunks.length} chunks`);
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -50,21 +54,44 @@ export async function POST(req: NextRequest) {
 
         try {
           for (let i = 0; i < chunks.length; i++) {
-            const result = await synthesizeSpeech(chunks[i], {
-              languageCode,
-              voiceName,
-            });
+            let result;
+            let retries = 0;
+            const maxRetries = 2;
 
-            send({
-              type: 'chunk',
-              index: i,
-              total: chunks.length,
-              audioBase64: result.audioBase64,
-            });
+            while (retries <= maxRetries) {
+              try {
+                result = await synthesizeSpeech(chunks[i], {
+                  languageCode,
+                  voiceName,
+                });
+                break;
+              } catch (err: any) {
+                const msg = err?.message || '';
+                // Retry on rate limit (429) or quota exhausted errors
+                if ((msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) && retries < maxRetries) {
+                  retries++;
+                  const delay = retries * 2000; // 2s, 4s backoff
+                  console.warn(`[TTS] Rate limited on chunk ${i}, retrying in ${delay}ms...`);
+                  await new Promise(r => setTimeout(r, delay));
+                  continue;
+                }
+                throw err;
+              }
+            }
+
+            if (result) {
+              send({
+                type: 'chunk',
+                index: i,
+                total: chunks.length,
+                audioBase64: result.audioBase64,
+              });
+            }
           }
 
           send({ type: 'done' });
         } catch (error) {
+          console.error('[TTS] Stream error:', error);
           send({
             type: 'error',
             error: error instanceof Error ? error.message : 'TTS failed',

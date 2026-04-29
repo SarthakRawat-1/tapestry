@@ -69,6 +69,9 @@ export async function POST(req: NextRequest) {
           // Send taskId to client so it can track this research
           send({ type: 'taskCreated', taskId, deepresearchId });
 
+          // These will be populated by the synthesis callback and reused after pipeline completes
+          let allSources: Array<{ title: string; url: string; snippet?: string; grounded: boolean }> = [];
+
           const result = await runResearchPipeline(
             location.name,
             location.lat,
@@ -82,46 +85,53 @@ export async function POST(req: NextRequest) {
                 data: progress.data,
               });
             },
-            { customInstructions, excludedSources },
+            {
+              customInstructions,
+              excludedSources,
+              // Send the documentary to the client as soon as synthesis finishes,
+              // before the illustration step starts. This lets the user read the
+              // content while AI images are still being generated.
+              onSynthesisComplete: (output, images, sources, groundingSources) => {
+                const imgUrls = images.slice(0, 10).map((img) => img.url);
+                const srcList = sources.slice(0, 20).map((s) => ({
+                  title: s.title,
+                  url: s.url,
+                  snippet: s.content?.substring(0, 200),
+                }));
+
+                const groundingUrls = new Set(
+                  (groundingSources || []).map((gs) => gs.url).filter(Boolean),
+                );
+                const taggedSources = srcList.map((s) => ({
+                  ...s,
+                  grounded: groundingUrls.has(s.url),
+                }));
+                const groundingOnlySources = (groundingSources || [])
+                  .filter((gs) => gs.url && !srcList.some((s) => s.url === gs.url))
+                  .map((gs) => ({
+                    title: gs.title || '',
+                    url: gs.url || '',
+                    snippet: 'Verified via Google Search',
+                    grounded: true,
+                  }));
+
+                allSources = [...taggedSources, ...groundingOnlySources];
+
+                console.log('[Research] ✓ Sending early result to client (before illustration)');
+                send({
+                  type: 'result',
+                  output,
+                  images: imgUrls,
+                  sources: allSources,
+                });
+              },
+            },
           );
 
           const images = result.images.slice(0, 10).map((img) => img.url);
-          const sources = result.sources.slice(0, 20).map((s) => ({
-            title: s.title,
-            url: s.url,
-            snippet: s.content?.substring(0, 200),
-          }));
 
-          // Merge Tavily sources with Google Search grounding sources
-          const groundingUrls = new Set(
-            (result.groundingSources || []).map((gs) => gs.url).filter(Boolean),
-          );
-
-          // Tag Tavily sources that were also verified by Google Search grounding
-          const taggedSources = sources.map((s) => ({
-            ...s,
-            grounded: groundingUrls.has(s.url),
-          }));
-
-          // Add grounding-only sources not already in Tavily results
-          const groundingOnlySources = (result.groundingSources || [])
-            .filter((gs) => gs.url && !sources.some((s) => s.url === gs.url))
-            .map((gs) => ({
-              title: gs.title || '',
-              url: gs.url || '',
-              snippet: 'Verified via Google Search',
-              grounded: true,
-            }));
-
-          const allSources = [...taggedSources, ...groundingOnlySources];
-
-          // Send the full structured output with images and merged sources
-          send({
-            type: 'result',
-            output: result.output,
-            images,
-            sources: allSources,
-          });
+          // Sources were already built and sent to client in onSynthesisComplete.
+          // allSources was populated there.
 
           // Send interleaved narrative (text + inline-generated images)
           let interleavedForClient: Array<{ type: string; text?: string; imageUrl?: string }> = [];

@@ -437,6 +437,8 @@ export interface PipelineResult {
 export interface PipelineOptions {
   customInstructions?: string;
   excludedSources?: string[];
+  /** Called after synthesis completes (before illustration) with the documentary output and search results */
+  onSynthesisComplete?: (output: ResearchOutput, images: TavilyImageResult[], sources: Array<TavilySearchResult & { query: string }>, groundingSources: Array<{ title?: string; url?: string }>) => void;
 }
 
 export async function runResearchPipeline(
@@ -446,7 +448,7 @@ export async function runResearchPipeline(
   onProgress: (progress: PipelineProgress) => void,
   options: PipelineOptions = {},
 ): Promise<PipelineResult> {
-  const { customInstructions, excludedSources } = options;
+  const { customInstructions, excludedSources, onSynthesisComplete } = options;
 
   // Step 1: Plan
   onProgress({ step: 'planning', message: 'Planning research queries...' });
@@ -480,6 +482,11 @@ export async function runResearchPipeline(
   });
 
   // Step 4: Illustrate (interleaved text + image generation)
+  // Send intermediate results to the client before illustration starts
+  if (onSynthesisComplete) {
+    onSynthesisComplete(output, searchResults.images, searchResults.textResults, groundingChunks);
+  }
+
   onProgress({ step: 'illustrating', message: 'Generating inline illustrations...' });
   let interleaved: InterleavedPart[] = [];
   try {

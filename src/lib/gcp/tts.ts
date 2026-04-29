@@ -45,6 +45,9 @@ export async function synthesizeSpeech(
     pitch = -1.0, // Slightly deeper for documentary feel
   } = options;
 
+  // Journey voices don't support pitch or speakingRate parameters
+  const isJourneyVoice = voiceName.includes('Journey');
+
   const body = {
     input: { text },
     voice: {
@@ -53,8 +56,8 @@ export async function synthesizeSpeech(
     },
     audioConfig: {
       audioEncoding: 'MP3' as const,
-      speakingRate,
-      pitch,
+      ...(!isJourneyVoice && { speakingRate }),
+      ...(!isJourneyVoice && { pitch }),
       effectsProfileId: ['large-home-entertainment-class-device'],
     },
   };
@@ -67,11 +70,18 @@ export async function synthesizeSpeech(
 
   if (!response.ok) {
     const err = await response.text();
+    console.error(`[TTS] API error ${response.status} for voice ${voiceName}:`, err);
     throw new Error(`TTS API error (${response.status}): ${err}`);
   }
 
   const data = await response.json();
   const audioBase64: string = data.audioContent;
+
+  if (!audioBase64) {
+    console.error('[TTS] No audioContent in response:', JSON.stringify(data).slice(0, 200));
+    throw new Error('TTS API returned no audio content');
+  }
+
   const audioBuffer = Buffer.from(audioBase64, 'base64');
 
   return { audioBase64, audioBuffer };
